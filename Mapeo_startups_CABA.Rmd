@@ -1,0 +1,195 @@
+---
+title: ""
+output: html_document
+date: "Marzo 2020"
+---
+
+## Mapeo de empresas de base tecnológica de la Ciudad Autónoma de Buenos Aires 2020
+
+
+```{r librerías, results="hide", warning=FALSE, message=FALSE}
+library(tidyverse)
+require(devtools)
+require(wrapar)
+library(sf)
+library(leaflet)
+library(dplyr)
+library(ggplot2)
+library(RColorBrewer)
+library(readxl)
+library(plotly)
+```
+
+La georeferenciación se hizo a partir de información obtenida por webscraping sobre links generados automáticamente con las razones sociales de startups de CABA que figuraban en la base de Crunchbase
+
+Carga de bases
+```{r, results="hide", warning=FALSE, message=FALSE }
+startups_base <- read_excel("Downloads/Mapa startups/Mapa_Startups_CABA.xlsx")
+startups_georef <- read.csv("Downloads/Mapa startups/startups_georef_actualizada.csv")
+info_radios <- st_read("https://bitsandbricks.github.io/data/CABA_rc.geojson")
+barrios_geo <- st_read("https://cdn.buenosaires.gob.ar/datosabiertos/datasets/ministerio-de-educacion/barrios/barrios.geojson")
+
+```
+
+```{r}
+# Agregamos una variable de ID y una columna que indique la ciudad
+startups_base <- startups_base %>% mutate(id = row_number())
+
+#Nos quedamos con los matchs
+startups_georef <- startups_georef %>%
+filter(nMatchAPI %in% 1)
+
+#Unimos al dataframe de base
+startups_georef <- left_join(startups_georef, startups_base)
+```
+
+Convertimos la dataframe a objeto SF
+```{r}
+startups_SF <- st_as_sf(startups_georef,
+                coords = c("ubicacion.lon","ubicacion.lat"),
+                   crs=4326)
+
+#Para guardado: write.csv(startups_SF, "startups_SF.csv", row.names = FALSE)
+```
+
+
+Hacemos un mapa interactivo con la función leaflet
+```{r}
+leaflet(startups_SF) %>% 
+  addTiles() %>%
+  addMarkers(label = ~ Nombre,
+             popup = ~ Sector) 
+```
+Hacemos otro mapa que sume popups con información sobre:  
+- Nombre de la startup. 
+- Año de fundación  
+- Industria  
+- Etapa de fondeo  
+- Monto de fondeo  
+```{r}
+leaflet(startups_SF) %>% 
+  addTiles() %>%
+  addMarkers(popup = ~ Info,
+             popupOptions=popupOptions(textsize = "16px"))
+```
+
+Para crear un menú que nos permita seleccionar las industrias de interés, creamos primero las categorías
+```{r}
+Marketplace <- startups_SF %>% filter(Sector == "Marketplace")
+SaaS <- startups_SF %>% filter(Sector == "SaaS")
+Ciberseguridad <- startups_SF %>% filter(Sector == "Ciberseguridad")
+Ecommerce <- startups_SF %>% filter(Sector == "Ecommerce")
+Fintech <- startups_SF %>% filter(Sector == "Fintech")
+Aeroespacial <- startups_SF %>% filter(Sector == "Aeroespacial")
+Proptech <- startups_SF %>% filter(Sector == "Proptech")
+EdTech <- startups_SF %>% filter(Sector == "Edtech")
+Transporte <- startups_SF %>% filter(Sector == "Transporte")
+Juegos <- startups_SF %>% filter(Sector == "Juegos")
+AdTech <- startups_SF %>% filter(Sector == "Adtech")
+#AgTech <- startups_SF %>% filter(Sector == "Agtech")
+```
+
+
+```{r}
+mapa_menu <- leaflet(startups_SF) %>% 
+  addTiles() %>%
+  addMarkers(data = AdTech, popup = ~ Info, group = "Adtech" )%>%
+  addMarkers(data = Aeroespacial, popup = ~ Info, group = "Aeroespacial" ) %>%
+ # addMarkers(data = AgTech, popup = ~ Info, group = "Agtech" ) %>%
+  addMarkers(data = Ciberseguridad, popup = ~ Info, group = "Ciberseguridad" ) %>%
+  addMarkers(data = Ecommerce, popup = ~ Info, group = "Ecommerce" ) %>%
+  addMarkers(data = EdTech, popup = ~ Info, group = "Edtech" ) %>%
+  addMarkers(data = Fintech, popup = ~ Info, group = "Fintech" ) %>%
+  addMarkers(data = Juegos, popup = ~ Info, group = "Juegos" ) %>%
+  addMarkers(data = Marketplace, popup = ~ Info, group = "Marketplace" ) %>%
+  addMarkers(data = Proptech, popup = ~ Info, group = "Proptech" ) %>%
+  addMarkers(data = SaaS, popup = ~ Info, group = "SaaS" ) %>%
+  addMarkers(data = Transporte, popup = ~ Info, group = "Transporte" ) %>%
+  addLayersControl(overlayGroups = c("Adtech", "Aeroespacial", "Ciberseguridad",
+                                     "Ecommerce", "Edtech", "Fintech", "Juegos", "Marketplace",
+                                     "Proptech", "SaaS", "Transporte"),
+                   options = layersControlOptions(collapsed = FALSE,
+                                                  position = "bottomleft"))
+```
+
+
+```{r}
+mapa_menu_filtrado <- mapa_menu %>% hideGroup("Edtech") %>%   
+  hideGroup("Aeroespacial") %>%
+  hideGroup("Adtech") %>%
+#  hideGroup("Agtech") %>%
+  hideGroup("Ciberseguridad") %>%
+  hideGroup("Ecommerce") %>%
+  hideGroup("Fintech") %>%
+  hideGroup("Juegos") %>%
+  hideGroup("Marketplace") %>%
+  hideGroup("Proptech") %>%
+  hideGroup("SaaS") %>%
+  hideGroup("Transporte")
+  
+
+mapa_menu_filtrado
+```
+
+
+```{r, echo=FALSE}
+#leaflet(startups_SF) %>% 
+#  addTiles() %>%
+ # addMarkers(label = ~ Nombre,
+  #           popup = ~ Sector,
+   #          labelOptions = labelOptions(noHide = T, textsize = "9px", direction = "bottom", textOnly = F)) 
+```
+
+Ahora vamos a analizar la presencia de empresas por barrio. 
+
+Agrupamos por ambos datasets por barrio y los unimos:
+
+```{r}
+startups_por_Barrio<- startups_SF %>%
+  group_by(Barrio) %>%
+  summarise(cantidad_tipo1 = n()) %>%
+  mutate(BARRIO = Barrio)
+```
+
+
+```{r}
+startups_barrios <- st_join(barrios_geo, startups_por_Barrio)
+```
+
+```{r}
+cantidad_startups_barrio<- ggplot() + geom_sf(data = startups_barrios, aes(fill = cantidad_tipo1)) +
+  theme_minimal() +
+  coord_sf(datum = NA) +
+scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+  labs(fill="Cantidad",color="Barrio",title="Cantidad de empresas por barrio",subtitle='selección de principales empresas tech de CABA', caption = "Fuente: elaboración propia con datos de Crunchbase y NOSIS, 2020")
+
+cantidad_startups_barrio
+```
+
+
+
+```{r}
+cantidad_startups_barrio_ajustada <- ggplot() + geom_sf(data = startups_barrios, aes(fill = cantidad_tipo1/AREA)) +
+  theme_minimal() +
+  coord_sf(datum = NA) +
+scale_fill_continuous(high = "#132B43", low = "#56B1F7") +
+  labs(fill="Cantidad/km2",color="Barrio",title="Cantidad de empresas de base tecnológica de CABA",subtitle='por barrio, ajustado por área', caption = "Fuente: elaboración propia con datos de Crunchbase y NOSIS, 2020")
+
+#Sacamos la notación científica: 
+options(scipen = 999)
+
+cantidad_startups_barrio_ajustada
+```
+
+
+
+```{r, echo=FALSE}
+#info_barrios <- info_radios %>% 
+ # group_by(BARRIO) %>% 
+  #summarise(POBLACION = sum(POBLACION),
+   #         VIVIENDAS = sum(VIVIENDAS),
+    #        HOGARES = sum(HOGARES),
+     #       HOGARES_NBI = sum(HOGARES_NBI),
+      #      AREA_KM2 = sum(AREA_KM2)) 
+```
+
